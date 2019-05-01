@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import jcifs.dcerpc.msrpc.eventlog;
 import jcifs.dcerpc.msrpc.lsarpc;
 import jcifs.dcerpc.msrpc.netdfs;
 import jcifs.dcerpc.msrpc.samr;
@@ -47,6 +48,7 @@ public class DcerpcBinding {
         INTERFACES.put("netlogon", "12345678-1234-abcd-ef00-01234567cffb:1.0");
         INTERFACES.put("wkssvc", "6BFFD098-A112-3610-9833-46C3F87E345A:1.0");
         INTERFACES.put("samr", "12345778-1234-ABCD-EF00-0123456789AC:1.0");
+        INTERFACES.put("eventlog", eventlog.getSyntax());
     }
 
 
