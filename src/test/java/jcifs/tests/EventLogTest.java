@@ -16,7 +16,7 @@ public class EventLogTest {
 
     private rpc.policy_handle policyHandle;
 
-    //Make sure netstat on event log server is listening on :445
+    //Make sure netstat on active directory host is listening on :445
     //For some reason, it was not until I deselected/selected file sharing
     //Establish a ssh tunnel
     //sudo ssh -f Administrator@10.192.39.247 -L 445:127.0.0.1:445 -N
@@ -36,11 +36,40 @@ public class EventLogTest {
             openRPCConnection();
             openEventLog();
 
-            long offset = retrieveOldestRecordID();
+            read();
+
+        } catch (Exception e) {
+            System.out.println("Eventlog exception " + e);
+        } finally {
+            closeEventLog();
+            closeRPCConnection();
+        }
+    }
+
+    private void read() {
+        long lastOffset = 0;
+        while (true) {
+            try {
+                lastOffset = readEvents(lastOffset);
+                Thread.sleep(5000);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private long readEvents(long lastRead) throws Exception {
+        long oldestRecordID = retrieveOldestRecordID();
+        long noOfRecords = retrieveTotalRecords();
+        System.out.printf("========= from = %d to = %d =============\n", lastRead, oldestRecordID + noOfRecords);
+
+        lastRead = Math.max(lastRead, retrieveOldestRecordID());
+
+        while (lastRead < oldestRecordID + noOfRecords) {
             eventlog.EventLogReadEventLog re =
                     new eventlog.EventLogReadEventLog(policyHandle,
                             eventlog.EVENTLOG_SEEK_READ | eventlog.EVENTLOG_FORWARDS_READ,
-                            (int) offset, 16384);
+                            (int) lastRead, 32768);
 
             rpcHandle.sendrecv(re);
             checkNtStatus(re.retval);
@@ -51,20 +80,22 @@ public class EventLogTest {
                         System.out.printf("LOGON %d source = %s computer=%s strings=%s\n",
                                 entry.event_type, entry.source_name, entry.computer_name, Arrays.toString(entry.strings));
                     } else if (entry.event_id == 4634) {
-                        System.out.printf("LOGOFFsource = %s computer=%s strings=%s\n",
-                                entry.source_name, entry.computer_name, Arrays.toString(entry.strings));
+                        System.out.printf("LOGOFF %d source = %s computer=%s strings=%s\n",
+                                entry.event_type, entry.source_name, entry.computer_name, Arrays.toString(entry.strings));
+                    } else {
+//                        System.out.printf("OTHER %d source = %s computer=%s strings=%s\n",
+//                                entry.event_type, entry.source_name, entry.computer_name, Arrays.toString(entry.strings));
                     }
                 }
+
+                lastRead += re.entries.size();
+                System.out.printf("lastRead = %d last one = %d\n", lastRead, oldestRecordID + noOfRecords);
             }
 
-        } catch (Exception e) {
-            System.out.println("Eventlog exception " + e);
-        } finally {
-            closeEventLog();
-            closeRPCConnection();
         }
-    }
 
+        return lastRead;
+    }
 
     private void openRPCConnection() throws Exception {
         CIFSContext context = new BaseContext(new PropertyConfiguration(new Properties()));
@@ -94,6 +125,10 @@ public class EventLogTest {
         checkNtStatus(ce.retval);
     }
 
+    private long getLastRecordNumber() throws Exception {
+        return retrieveOldestRecordID() + retrieveTotalRecords() - 1;
+    }
+
     private long retrieveOldestRecordID() throws DcerpcException, IOException {
         eventlog.EventLogGetOldestEntry go = new eventlog.EventLogGetOldestEntry(policyHandle);
 
@@ -102,8 +137,16 @@ public class EventLogTest {
         return go.oldestEntryNumber & 0xFFFFFFFFL;
     }
 
+    private long retrieveTotalRecords() throws DcerpcException, IOException {
+        eventlog.EventLogGetNumRecords gn = new eventlog.EventLogGetNumRecords(policyHandle);
+
+        rpcHandle.sendrecv(gn);
+        checkNtStatus(gn.retval);
+
+        return gn.numberOfRecords & 0xFFFFFFFFL;
+    }
+
     private void checkNtStatus(int nt_status) {
-        System.out.println("NtStatus = " + nt_status);
         // Base on nt_status to throw out exception.
         if (nt_status != NtStatus.NT_STATUS_OK) {
             throw new RuntimeException("Incorrect status = " + nt_status);
